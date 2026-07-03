@@ -1,26 +1,61 @@
-# AppLevel Configurations
 paths:
-  video_path: "~/Datasets/Tennis/Videos/TOP 100 SHOTS & RALLIES_ 2019 ATP Season-(1080p).mp4" # Path of the video
-  img_path: "~/Datasets/Tennis/images/test/images/" # Dir of test images if evaluation is turned on
+  video_path: "assets/input_videos/match_01.mp4"
+  img_path: "assets/input_images/"
   players_path: "assets/data/gt/players.csv"
-  groundtruth_path: "~/Datasets/Tennis/groundtruth.json"
-  output_video_path: "~/Datasets/Tennis/Debug/export.mp4"
-  logs_path: "~/Datasets/Tennis/Debug/result.json"
+  groundtruth_path: "assets/data/gt/groundtruth.json"
+  output_video_path: "assets/output_videos/match_01_annotated.mp4"
+  logs_path: "assets/logs/session_analytics.json"
+  keypoints_cache_path: "assets/cache/keypoints_cache.json"
+
 streamer:
-  should_draw: true # Draws the result if enabled
+  should_draw: true
   view_imshow: true
   save_stream: false
-  debug: false # turn on or off debug logs
-  evaluation: false # Calculates the average matching names, scores, serving player over the test dataset.
-# Model Paths
-models:
-  score_det_model: "assets/models/detector.engine" # Model path of the Detector
-  detector_config: "assets/configs/detector_config.yaml"
-  text_rec_model: "assets/models/text_rec_revamped.pth" # Model path of CRNN
-  text_rec_config: "assets/configs/text_rec_config.yaml"
-  ocr_engine: "CRNN" # CRNN or PyTesseract
+  debug: false
+  evaluation: false
 
-thresholds:
-  ref_points : [336, 833, 492, 835, 962, 833, 1430, 835, 1584, 833, 597, 571, 960, 571, 1313, 571, 729,
-                              272, 957, 276, 1182, 274, 692, 203, 756, 206, 1153, 210, 1218, 206]
-  src_points : [602, 570, 960, 572, 1313, 574, 1180, 275, 957, 275, 728, 275]
+models:
+  score_det_model: "assets/models/yolov8x_pickleball.onnx"
+  detector_config: "assets/configs/detector_config.yaml"
+  court_regressor_model: "assets/models/resnet50_keypoints.pth"
+  text_rec_model: "assets/models/text_rec_revamped.pth"
+  text_rec_config: "assets/configs/text_rec_config.yaml"
+  ocr_engine: "CRNN"
+
+detector:
+  yolo_engine_path: "assets/models/yolov8x_pickleball.onnx"
+  execution_provider: "CUDAExecutionProvider"
+  confidence_threshold: 0.25
+  iou_threshold: 0.45
+  inference_image_size: 1280
+
+court_regressor:
+  model_path: "assets/models/resnet50_keypoints.pth"
+  num_keypoints: 12
+  iterative_refinement: true
+  max_iterations: 15
+  convergence_threshold: 0.2
+
+ball_tracker:
+  max_velocity_fps: 161.3
+  max_gap_interpolation_frames: 5
+  motion_fallback_enabled: true
+  min_rally_duration_seconds: 1.5
+
+player_tracker:
+  court_filtering: true
+  min_track_length_frames: 15
+  proximity_threshold_feet: 3.5
+
+scoring:
+  mode: "traditional"
+  target_score: 11
+  win_by_two: true
+  starting_state: "0-0-2"
+
+dupr_api:
+  enabled: true
+  api_url: "https://api.mydupr.com"
+  client_key: "ENV_DUPR_CLIENT_KEY"
+  client_secret: "ENV_DUPR_CLIENT_SECRET"
+  sandbox_mode: false

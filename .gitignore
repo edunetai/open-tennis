@@ -1,6 +1,133 @@
-.idea/
-_pycache__/.
-!**/__pycache__/
+# Python
 __pycache__/
-*.pyc
-assets/data/result
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+wheels/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+test_*.py
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Type checking and linting
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+assets/logs/
+assets/cache/
+
+# Model artifacts and weights
+assets/models/*.engine
+assets/models/*.pt
+assets/models/*.pth
+assets/models/*.onnx
+assets/models/*.bin
+assets/models/*.safetensors
+assets/models/*.h5
+assets/models/*.pb
+
+# Large binary data and media
+assets/input_videos/
+assets/output_videos/
+assets/demo/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+
+# Ground truth and dataset caches
+assets/data/gt/
+assets/data/result/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Tensorboard
+logs/
+runs/
+
+# C extensions
+*.c
+*.h
+*.cpp
+*.hpp
+
+# Documentation builds
+docs/_build/
+*.md.build

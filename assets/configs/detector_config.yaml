@@ -1,9 +1,8 @@
 model:
-  execution_env: "cuda:0" # Supports CUDA, CPU , TensorRT (on compatible hardware)
-  conf_thresh: 0.6
-  iou_thresh: 0.5
+  execution_env: "cuda:0"
+  conf_thresh: 0.25
+  iou_thresh: 0.45
   warm_up: 25
-  class_labels: [ "ball","1","2","3","6","5",
-                  "4","scoreboard","central" ]
+  class_labels: ["ball", "person", "scoreboard", "keypoint"]
   stride: 32
-  img_size: 640
+  img_size: 1280

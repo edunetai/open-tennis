@@ -1,0 +1,936 @@
+﻿Engineering Specification and Actionable Implementation Backlog for Refactoring the Open-Tennis Framework into a Modernized Pickleball Video Analytics Platform
+The open-tennis framework provides a foundational computer vision architecture designed to analyze tennis matches using object detection, court boundary line extraction, and scoreboard parsing. However, legacy systems designed around classical tennis dynamics struggle when adapted to pickleball due to significant differences in court geometry, faster ball speeds, smaller ball profiles, and unique scoring structures.2
+This specification provides a comprehensive, self-contained guide for Google Antigravity to refactor, modernize, and adapt the open-tennis repository into a high-precision pickleball analytics platform.1
+Architectural Assessment of the Open-Tennis Legacy Framework and Transition Strategy
+The legacy open-tennis system depends on a rigid framework optimized for standard broadcast tennis matches. Re-engineering this codebase for pickleball requires replacing outdated components with modern, high-precision computer vision techniques.5
+Legacy Codebase Analysis
+The original open-tennis repository is structured as a pipeline that runs single-camera video inference to extract court edges and detect scoreboards. The legacy architecture consists of:
+* An orchestrator (app.py) that handles configuration parsing and frame iteration.
+* A scoreboard localization module using YOLOv5 for region of interest bounding boxes.
+* An optical character recognition (OCR) sub-system relying on TesserOCR or CRNN to extract player names and scores.
+* A classical Hough Transform line-detection model to localize court boundaries.
+
+
+
+
+
+
+Legacy Pipeline (Open-Tennis):
+[Video Frame] ──> ──> ──> Score/Server State
+             ──> [Classical Hough Lines]  ──> [Homography Projection] ──> Court Boundaries
+
+Limitations of Classical CV and YOLOv5 in Pickleball Environments
+Adapting this legacy pipeline directly to pickleball exposes several technical limitations 2:
+1. Vulnerability of Hough Transforms to Multi-Line Noise: Classical line detection using Hough transforms depends on high-contrast white pixels and manual parameter tuning. Pickleball courts feature interior markings—specifically the non-volley zone (NVZ) or "kitchen" lines and centerlines—that lie close to each other.3 This proximity often causes Hough models to snap incorrectly to the net or adjacent interior lines rather than the outer court boundaries.5
+2. Inadequate Resolution for Small Object Tracking: The legacy YOLOv5 detector operates at a default resolution of    pixels.1 While sufficient for a bright yellow tennis ball, this resolution is too low to reliably detect a standard pickleball.5 A pickleball is smaller (approximately    in diameter), has multiple perforated holes that soften its visual edge, and moves at speeds up to    (  ), causing severe motion blur.5 Running inference at    results in a low ball-detection rate of around 60%, whereas upgrading the inference resolution to    increases detection accuracy to nearly 100%.5
+3. Inefficient Multi-Stage Inference: The legacy scoreboard pipeline runs separate deep networks for localization and text recognition, adding overhead that limits real-time performance on edge hardware.1
+4. Lack of Spatial and Kinematic Tracking: The open-tennis framework only identifies players and courts visually; it lacks the coordinate mapping needed to calculate physical metrics like ball velocity, player speed, and run distances.1
+Modernized System Architecture
+The modernized pickleball framework transitions the codebase to a deep keypoint regression model and a physics-constrained tracking engine.5 The upgraded system is structured as follows:
+
+
+
+
+
+
+Modernized Pipeline:
+[Frame (imgsz=1280)] ──> ──> Ball & Player Ground Coordinates
+                    ──>  ──> 12 Canonical Court Keypoints
+                                                   │
+                                                   ▼
+                                     
+                                                   │
+                                                   ▼
+                                      [Physics-Constrained Linker] ──> Trajectory & Physics
+
+This upgraded pipeline replaces YOLOv5 with a modern YOLOv8 or YOLOv10 object detection backbone.5 It replaces classical Hough lines with a fine-tuned ResNet50 keypoint regressor that maps 12 distinct points on the court floor.5 These pixel coordinates are processed by an iterative homography solver to map the action to a 2D physical grid.5
+A physics-constrained tracking engine then tracks the ball's movement frame-by-frame, filtering out spectator noise and correcting for brief occlusions using motion-based frame differencing.5
+Physical and Rule-Based Domain Modeling
+To properly adapt the system's spatial measurements and score-tracking logic, the physical dimensions and rules of pickleball must be programmed into the core configuration modules.3
+Physical Court Specifications
+A pickleball court uses a uniform    rectangle for both singles and doubles play.3 This simplifies boundary detection compared to tennis, which uses separate lines for singles and doubles matches.3
+Court Segment
+	Physical Dimensions
+	Canonical Image Target Coordinates (Feet)
+	Entire Court Outlines
+	  
+
+	Width bounds:   ; Length bounds:   
+	Non-Volley Zone (Kitchen)
+	  
+
+	Opponent:   ; Server:   
+	Left Service Box
+	  
+
+	Opponent:   
+	Right Service Box
+	  
+
+	Opponent:   
+	Net Assembly
+	Post-to-post:    (extends    beyond sidelines)
+	  
+; Height:    at posts,    at center
+	Line Width
+	  
+ (measured to the outside edge of lines)
+	Uniformly modeled as a    line coordinate band
+	Score State-Machine Engine
+Pickleball's traditional side-out scoring requires a different state-machine logic than the game-set-match structure used in tennis.4 The tracking engine must monitor player positions and score states to ensure calculations remain accurate during rallies.4
+
+
+
+
+
+
+Initial State: "0-0-2" (Only Server 2 serves in the opening rotation) [4]
+    │
+    ├─► Server Team Wins Rally ──► Score Increments, Partners Swap Sides [4]
+    │
+    └─► Server Team Loses Rally ─┬► (If Server 1): Demote to Server 2 [4]
+                                 │
+                                 └► (If Server 2): Side-Out Declared [4]
+                                                   Opponent Team Serves from Right (Even Score) [13]
+
+During doubles play, the system tracks and reports three numbers: the serving team's score, the receiving team's score, and the active server number (either 1 or 2).4 A side-out occurs when the serving team loses a rally on their second server's turn, which transfers service to the opposing team.4
+The game-start sequence begins at 0-0-2 to offset the initial serving advantage by granting the first serving team only one service turn.4 After the first side-out, both players on a team serve before service passes back to the opponents.4
+Modernized Computer Vision and Kinematic Tracking Pipeline
+The core analytical capabilities of this platform rely on mapping video frame pixels to physical court coordinates.5 This allows the system to compute precise metrics for ball speed and player movement.5
+Geometric Homography Solver
+To perform these calculations, the system maps 2D pixel coordinates    to real-world physical coordinates on the court floor    using a homography matrix   .5 This projection is defined as:
+  
+
+Solving for physical coordinates yields:
+  
+
+  
+
+The homography matrix    is computed using 12 coordinates mapped by the ResNet50 keypoint regressor.5 These coordinates correspond to key intersections on a standard    court floor 3:
+
+
+
+
+
+
+(0,44) K0 ══════════ K1 ══════════ K2 (20,44)   <── Opponent Baseline
+  ║                 ║                 ║
+(0,29) K3 ══════════ K4 ══════════ K5 (20,29)   <── Opponent Kitchen Line
+─────────────────── NET LINE ─────────────────   <── y = 22
+(0,15) K6 ══════════ K7 ══════════ K8 (20,15)   <── Server Kitchen Line
+  ║                 ║                 ║
+(0,0)  K9 ══════════ K10 ═════════ K11 (20,0)   <── Server Baseline
+
+To account for optical distortion and lens errors, the homography matrix is optimized using an iterative pixel-level refinement loop.5 This optimization extracts white-line pixels above a defined brightness threshold and back-projects them into physical coordinate space using the initial homography   .2
+The system then minimizes the sum of squared physical residuals:
+  
+
+where    represents the pixel coordinates of the detected lines, and    represents the canonical lines of the court layout.3 This optimization loop reduces physical measurement error to a mean residual of   .5
+Physics-Based Ball Tracker and Motion Fallback
+Tracking a high-speed pickleball requires strict physical filtering to eliminate false positives, such as player shoes or spectators in stadium seating.5
+
+
+
+
+
+
+            │
+           ▼
+   Is displacement from previous frame:
+   ||b_t - b_{t-1}||_2  <=  v_max * dt?
+           │
+   ┌───────┴───────┐
+   ▼               ▼
+            [NO]
+   │               │
+   ▼               ▼
+Keep Point     Discard Point as Physical Anomaly
+              Trigger Motion-Differencing Fallback
+
+Let    represent the physical position of the ball at frame   . The inter-frame distance is constrained by the maximum physical speed of a pickleball (   or   ) 5:
+  
+
+At   , this limits inter-frame movement to a maximum of    5:
+  
+
+Detections that exceed this limit are discarded as anomalies.5 If YOLO fails to detect the ball for fewer than 5 consecutive frames due to motion blur or occlusion, a motion-differencing fallback is triggered.5 This module crops the search area around the ball's last known trajectory vector and performs frame subtraction 5:
+  
+
+Applying morphological thresholding to this difference isolates the moving centroid, which is then used to fill the missing trajectory points via cubic spline interpolation.5
+Velocity-Reversal Hit Detection Heuristic
+To track rallies and identify active shots without relying on complex event models, the pipeline uses a physics-based velocity-reversal heuristic.5 Let    represent the ball's physical velocity vector:
+  
+
+A hit is registered if the direction of the ball's velocity vector reverses sharply while in close proximity to a tracked player.5 This direction change is determined by calculating the angular shift    between consecutive frames 5:
+  
+
+where    is set to    (corresponding to a direction change of more than   ). This event is confirmed as a shot if the ball is within a defined physical radius of a player's bounding box    5:
+  
+
+where    defaults to a maximum distance of    on the court floor.5
+Unified Score Parsing and DUPR Platform Synchronization
+The modernized platform automates match parsing by translating scoreboard text into standardized scoring formats and syncing results directly with DUPR.1
+Scoreboard Parser and Pickleball Parity Rules
+Traditional tennis scoreboard parsers expect a set-and-game structure. For pickleball, the scoreboard parser is updated to extract three numbers (e.g., 11-8-2), corresponding to the serving score, receiving score, and active server.4
+
+
+
+
+
+
+  ┌──────────────────────────────────────────────────────────┐
+ │  OCR Text Read: "10 08 2"                                │
+ └─────────────────────────────┬────────────────────────────┘
+                               │
+                               ▼
+ ┌──────────────────────────────────────────────────────────┐
+ │  Validate Score State Consistency:                       │
+ │  Is Active Server == 2? (Yes)                            │
+ │  Is Server Score Even (10)? (Yes)                        │
+ │  => Server 2 must serve from the right side of court     │
+ └─────────────────────────────┬────────────────────────────┘
+                               │
+                               ▼
+ ┌──────────────────────────────────────────────────────────┐
+ │  Confirm player positioning matches server parity rules  │
+ └──────────────────────────────────────────────────────────┘
+
+The parsed scoreboard data is validated using player parity rules 4:
+   * The first server of a side-out sequence starts on the right side of the court.12
+   * When the serving team's score is an even number (  ), the player who started the game on the right side must be positioned on the right side of the court.4
+   * When the serving team's score is an odd number (  ), that same player must be positioned on the left side of the court.4
+This validation step ensures the OCR matches the physical player positions on the court.4
+DUPR Platform Integration Schema
+DUPR uses a modified Elo rating algorithm to calculate a player's skill level on a scale from    to   .17 These updates evaluate actual point outcomes against pre-match performance expectations.18
+
+
+
+
+
+
+Match Results Compiled (JSON)
+         │
+         ▼
+POST /auth/v1.0/token ───────────────>
+         │
+         ▼
+POST /v1.0/match (Header: JWT) ──────>
+         │
+         ▼
+Match Logged ────────────────────────>
+
+To sync match results, the client connects to the DUPR API.16 It first exchanges partner credentials for a stateless JWT token, which is used to authorize the match submission payload 16:
+  
+
+The client then posts the match details to the endpoint using a verified JSON schema 16:
+
+
+
+
+
+
+JSON
+{
+ "match_source": "COURT_CHECK_CV",
+ "match_type": "DOUBLES",
+ "scoring_format": "ONE_GAME_TO_11",
+ "game_results":,
+ "team_1": {
+   "player_1_dupr_id": "DPR87261",
+   "player_2_dupr_id": "DPR54329"
+ },
+ "team_2": {
+   "player_1_dupr_id": "DPR21098",
+   "player_2_dupr_id": "DPR65431"
+ }
+}
+
+Actionable Implementation Backlog for Google Antigravity
+This backlog contains the step-by-step instructions, file structures, configuration files, and code files needed to convert the codebase from tennis to pickleball.1
+
+
+
+
+
+
+Legacy Repository Structure        Target Modular Architecture 
+open-tennis/                             open-tennis/
+├── app.py                               ├── app.py (Orchestrator)
+├── requirements.txt                     ├── requirements.txt (Modernized specs)
+├── assets/                              ├── assets/
+│   ├── config/                          │   ├── config/app_config.yaml
+│   └── models/                          │   └── models/ (ResNet50 & YOLOv8/v10)
+└── src/                                 └── src/
+   ├── court/ (Hough transforms)            ├── court/ (Geometry solvers)
+   └── scoreboard/ (OCR reader)             ├── tracker/ (Ball & Player filters)
+                                            ├── scoreboard/ (3-number parser)
+                                            └── rating/ (DUPR API integrations)
+
+Step 1: Environment and Dependency Modernization
+This step updates the dependencies in requirements.txt to replace the legacy YOLOv5 and TesserOCR packages with modern machine learning and computer vision libraries.1
+Target File: requirements.txt
+numpy>=1.22.0 opencv-python>=4.6.0.66 torch>=2.0.0 torchvision>=0.15.0 ultralytics>=8.0.0 # Replaces legacy YOLOv5 with YOLOv8/v10 onnxruntime-gpu>=1.14.0 # High performance model inference execution pyyaml>=6.0 requests>=2.28.0 # Required for DUPR REST APIs pytest>=7.0.0 # Required for unit tests scipy>=1.9.0 # Required for cubic spline calculations
+Execution Commands:
+
+
+
+
+
+
+Bash
+# Deactivate any legacy environment and build a clean modern python 3.10 arena
+conda create -n pickleball_watch python=3.10 -y
+conda activate pickleball_watch
+
+# Install updated environment packages
+pip install -r requirements.txt
+
+Step 2: Unified Pickleball Configuration Deployment
+This step updates the system's YAML configuration to use pickleball-specific tracking and scoring parameters.1
+Target File: assets/config/app_config.yaml
+
+
+
+
+
+
+YAML
+paths:
+ video_path: "assets/input_videos/match_01.mp4"
+ output_video_path: "assets/output_videos/match_01_annotated.mp4"
+ logs_path: "assets/logs/session_analytics.json"
+ keypoints_cache_path: "tracker_stubs/keypoints_cache.json"
+
+detector:
+ yolo_engine_path: "assets/models/yolov8x_pickleball.onnx"
+ execution_provider: "CUDAExecutionProvider" # Supports CUDAExecutionProvider or CPUExecutionProvider
+ confidence_threshold: 0.25
+ iou_threshold: 0.45
+ inference_image_size: 1280 # High resolution to track the small pickleball
+
+court_regressor:
+ model_path: "assets/models/resnet50_keypoints.pth"
+ num_keypoints: 12
+ iterative_refinement: true
+ max_iterations: 15
+ convergence_threshold: 0.2 # residual distance tolerance in feet
+
+ball_tracker:
+ max_velocity_fps: 161.3 # 110 mph physical limit for a pickleball
+ max_gap_interpolation_frames: 5
+ motion_fallback_enabled: true
+ min_rally_duration_seconds: 1.5
+
+player_tracker:
+ court_filtering: true # ignores spectators outside the court boundaries
+ min_track_length_frames: 15
+ proximity_threshold_feet: 3.5
+
+scoring:
+ mode: "traditional" # Support for traditional (side-out) or rally scoring
+ target_score: 11
+ win_by_two: true
+ starting_state: "0-0-2"
+
+dupr_api:
+ enabled: true
+ api_url: "https://api.mydupr.com"
+ client_key: "ENV_DUPR_CLIENT_KEY"
+ client_secret: "ENV_DUPR_CLIENT_SECRET"
+ sandbox_mode: false
+
+Step 3: Geometry and Homography Solver Integration
+This module processes court pixel coordinates, projects coordinates to a 2D physical grid, and runs the iterative line-snapping optimization.5
+Target File: src/court/geometry_solver.py
+
+
+
+
+
+
+Python
+import numpy as np
+import cv2
+
+class GeometrySolver:
+   def __init__(self, canonical_points=None):
+       # 12 canonical floor positions for a 20x44 ft pickleball court (in feet)
+       self.canonical_points = canonical_points if canonical_points is not None else np.array([0.0, 44.0],   # K0: Left Opponent Baseline
+           [10.0, 44.0],  # K1: Center Opponent Baseline
+           [20.0, 44.0],  # K2: Right Opponent Baseline
+           [0.0, 29.0],   # K3: Left Opponent NVZ Line
+           [10.0, 29.0],  # K4: Center Opponent NVZ Line
+           [20.0, 29.0],  # K5: Right Opponent NVZ Line
+           [0.0, 15.0],   # K6: Left Server NVZ Line
+           [10.0, 15.0],  # K7: Center Server NVZ Line
+           [20.0, 15.0],  # K8: Right Server NVZ Line
+           [0.0, 0.0],    # K9: Left Server Baseline
+           [10.0, 0.0],   # K10: Center Server Baseline
+           [20.0, 0.0]    # K11: Right Server Baseline
+       ], dtype=np.float32)
+       self.H = None
+       self.H_inv = None
+
+   def fit_homography(self, detected_keypoints):
+       """
+       Calculates the homography matrix using 12 detected points and canonical points.
+       detected_keypoints: numpy array of shape (12, 2)
+       """
+       pts_src = np.array(detected_keypoints, dtype=np.float32)
+       self.H, status = cv2.findHomography(pts_src, self.canonical_points, cv2.RANSAC, 5.0)
+       if self.H is None:
+           raise ValueError("Homography fitting failed; invalid keypoint distribution.")
+       self.H_inv = np.linalg.inv(self.H)
+       return self.H
+
+   def pixel_to_court(self, pixel_coord):
+       """
+       Converts pixel coordinates (x, y) to physical court coordinates (x', y') in feet.
+       """
+       if self.H is None:
+           raise ValueError("Homography solver must be initialized first.")
+       pt = np.array([pixel_coord, pixel_coord, 1.0], dtype=np.float32).reshape(3, 1)
+       projected = np.dot(self.H, pt)
+       w = projected
+       return np.array([projected / w, projected / w], dtype=np.float32)
+
+   def court_to_pixel(self, court_coord):
+       """
+       Converts physical coordinates (x', y') in feet to pixel coordinates (x, y).
+       """
+       if self.H_inv is None:
+           raise ValueError("Homography solver must be initialized first.")
+       pt = np.array([court_coord, court_coord, 1.0], dtype=np.float32).reshape(3, 1)
+       projected = np.dot(self.H_inv, pt)
+       w = projected
+       return np.array([projected / w, projected / w], dtype=np.float32)
+
+   def calculate_velocity_and_speed(self, coord_t1, coord_t2, fps):
+       """
+       Calculates the physical speed of the ball in mph.
+       """
+       dist_ft = np.linalg.norm(coord_t2 - coord_t1)
+       time_sec = 1.0 / fps
+       vel_fps = dist_ft / time_sec
+       # Convert feet/second to miles/hour
+       speed_mph = vel_fps * 0.681818
+       return vel_fps, speed_mph
+
+   def is_within_court_polygon(self, physical_coord, padding=3.0):
+       """
+       Verifies if a physical coordinate is within the boundaries of the court (plus padding).
+       """
+       x, y = physical_coord, physical_coord
+       return (-padding <= x <= 20.0 + padding) and (-padding <= y <= 44.0 + padding)
+
+Step 4: Tracking and Kinematic Processing Modules
+These modules handle high-speed ball and player tracking, filtering out out-of-bounds spectator noise and correcting for brief occlusions.5
+Player Tracker with Boundary Filtering
+Target File: src/tracker/player_tracker.py
+
+
+
+
+
+
+Python
+import numpy as np
+
+class PlayerTracker:
+   def __init__(self, geometry_solver, min_track_length=15):
+       self.geometry_solver = geometry_solver
+       self.min_track_length = min_track_length
+       self.active_tracks = {}
+
+   def update_player_tracks(self, frame_id, detected_persons):
+       """
+       Filters out spectator noise and tracks active players on the court.
+       detected_persons: list of bounding boxes [x1, y1, x2, y2, track_id]
+       """
+       updated_tracks = {}
+       for box in detected_persons:
+           x1, y1, x2, y2, track_id = box
+           # Base coordinate (center bottom of player bounding box)
+           center_x = (x1 + x2) / 2.0
+           center_y = y2
+           
+           # Map bottom-center pixels to the physical court floor
+           physical_pos = self.geometry_solver.pixel_to_court((center_x, center_y))
+           
+           # Filter: Drop track if player is outside the court boundary (including padding)
+           if not self.geometry_solver.is_within_court_polygon(physical_pos, padding=5.0):
+               continue
+               
+           if track_id not in self.active_tracks:
+               self.active_tracks[track_id] = {
+                   "history":,
+                   "physical_history":,
+                   "frames":
+               }
+               
+           self.active_tracks[track_id]["history"].append([x1, y1, x2, y2])
+           self.active_tracks[track_id]["physical_history"].append(physical_pos)
+           self.active_tracks[track_id]["frames"].append(frame_id)
+           updated_tracks[track_id] = self.active_tracks[track_id]
+           
+       # Clean up short tracks to reduce noise from passing spectators
+       cleaned_tracks = {}
+       for track_id, data in updated_tracks.items():
+           if len(data["frames"]) >= self.min_track_length:
+               cleaned_tracks[track_id] = data
+               
+       return cleaned_tracks
+
+Motion Fallback Generator
+Target File: src/tracker/motion_ball.py
+
+
+
+
+
+
+Python
+import cv2
+import numpy as np
+
+class FrameDifferenceDetector:
+   def __init__(self, threshold_value=25):
+       self.prev_frame = None
+       self.threshold_value = threshold_value
+
+   def detect_motion(self, frame_image):
+       """
+       Performs frame subtraction to isolate moving objects when YOLO fails.
+       """
+       gray = cv2.cvtColor(frame_image, cv2.COLOR_BGR2GRAY)
+       gray = cv2.GaussianBlur(gray, (5, 5), 0)
+       
+       if self.prev_frame is None:
+           self.prev_frame = gray
+           return None
+           
+       frame_delta = cv2.absdiff(self.prev_frame, gray)
+       thresh = cv2.threshold(frame_delta, self.threshold_value, 255, cv2.THRESH_BINARY)
+       thresh = cv2.dilate(thresh, None, iterations=2)
+       
+       contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+       self.prev_frame = gray
+       
+       # Identify the smallest contour matching a pickleball's size profile
+       for contour in contours:
+           if cv2.contourArea(contour) < 10 or cv2.contourArea(contour) > 500:
+               continue
+           (x, y, w, h) = cv2.boundingRect(contour)
+           # Return the center point of the detected motion
+           return (x + w / 2.0, y + h / 2.0)
+           
+       return None
+
+Physics-Constrained Ball Linker
+Target File: src/tracker/ball_tracker.py
+
+
+
+
+
+
+Python
+import numpy as np
+from src.tracker.motion_ball import FrameDifferenceDetector
+
+class BallTracker:
+   def __init__(self, geometry_solver, max_velocity_fps=161.3, fps=30):
+       self.geometry_solver = geometry_solver
+       self.max_velocity_fps = max_velocity_fps
+       self.fps = fps
+       self.max_step_distance = max_velocity_fps * (1.0 / fps)
+       self.trajectory = # Holds physical coords: (x', y', frame_id)
+       self.motion_detector = FrameDifferenceDetector()
+
+   def process_frame(self, frame_id, frame_image, yolo_ball_centroid):
+       """
+       Validates and links ball detections across frames.
+       """
+       physical_candidate = None
+       
+       # Map YOLO detections to physical court coordinates
+       if yolo_ball_centroid is not None:
+           physical_candidate = self.geometry_solver.pixel_to_court(yolo_ball_centroid)
+           
+       # Physical Constraint Check: Filter out improbable position jumps
+       if physical_candidate is not None and len(self.trajectory) > 0:
+           last_pos = np.array(self.trajectory[-1][:2], dtype=np.float32)
+           dist_moved = np.linalg.norm(physical_candidate - last_pos)
+           
+           if dist_moved > self.max_step_distance:
+               # Discard detection if it exceeds physical movement speed limits
+               physical_candidate = None
+
+       # Fallback Check: Trigger motion-differencing if YOLO fails
+       if physical_candidate is None and frame_image is not None and len(self.trajectory) > 0:
+           fallback_pixel = self.motion_detector.detect_motion(frame_image)
+           if fallback_pixel is not None:
+               fallback_physical = self.geometry_solver.pixel_to_court(fallback_pixel)
+               last_pos = np.array(self.trajectory[-1][:2], dtype=np.float32)
+               dist_moved = np.linalg.norm(fallback_physical - last_pos)
+               if dist_moved <= self.max_step_distance:
+                   physical_candidate = fallback_physical
+
+       if physical_candidate is not None:
+           self.trajectory.append((physical_candidate, physical_candidate, frame_id))
+           return physical_candidate
+           
+       return None
+
+   def interpolate_gaps(self, max_gap_frames=5):
+       """
+       Interpolates short tracking gaps using cubic spline interpolation.
+       """
+       if len(self.trajectory) < 3:
+           return self.trajectory
+           
+       interpolated =
+       for i in range(len(self.trajectory) - 1):
+           curr_pt = self.trajectory[i]
+           next_pt = self.trajectory[i+1]
+           gap = next_pt - curr_pt
+           
+           interpolated.append(curr_pt)
+           if 1 < gap <= max_gap_frames:
+               for step in range(1, gap):
+                   alpha = step / float(gap)
+                   interp_x = (1 - alpha) * curr_pt + alpha * next_pt
+                   interp_y = (1 - alpha) * curr_pt + alpha * next_pt
+                   interp_frame = curr_pt + step
+                   interpolated.append((interp_x, interp_y, interp_frame))
+                   
+       interpolated.append(self.trajectory[-1])
+       self.trajectory = interpolated
+       return self.trajectory
+
+Step 5: Scoreboard OCR Parser and Game State Machine
+This module parses three-number scorelines and validates them against physical server parity rules.4
+Target File: src/scoreboard/parser.py
+
+
+
+
+
+
+Python
+import cv2
+import numpy as np
+
+class ScoreboardParser:
+   def __init__(self, target_score=11):
+       self.target_score = target_score
+       self.score_history =
+       self.current_state = {"server_score": 0, "receiver_score": 0, "server_num": 2}
+
+   def parse_score(self, scoreboard_crop_img):
+       """
+       Parses score details from the scoreboard image region.
+       In production, replace this stub with OCR model inference (e.g., CRNN).
+       """
+       # Returns current state when OCR is unavailable
+       return self.current_state
+
+   def validate_position_parity(self, server_score, active_server, physical_server_pos):
+       """
+       Validates parsed scores against physical player positions.
+       - Server 1 begins on the right side of the court.
+       - Even server scores = server must be on the right side of the court.
+       - Odd server scores = server must be on the left side of the court.
+       """
+       is_even = (server_score % 2 == 0)
+       server_x_coord = physical_server_pos
+       
+       if is_even:
+           # Server must be on the right side of the court (x > 10.0 ft)
+           return server_x_coord >= 10.0
+       else:
+           # Server must be on the left side of the court (x < 10.0 ft)
+           return server_x_coord < 10.0
+
+   def register_point(self, winning_team):
+       """
+       Updates the scoring state machine.
+       """
+       # In traditional scoring, only the serving team can win points
+       if winning_team == "SERVER":
+           self.current_state["server_score"] += 1
+       else:
+           # Side-out logic
+           if self.current_state["server_num"] == 1:
+               self.current_state["server_num"] = 2
+           else:
+               # Turn service over to the receivers
+               self.current_state["server_num"] = 1
+               temp = self.current_state["server_score"]
+               self.current_state["server_score"] = self.current_state["receiver_score"]
+               self.current_state["receiver_score"] = temp
+               
+       return self.current_state
+
+Step 6: DUPR API Integration Client
+This module handles DUPR API integration, authenticating with partner credentials and posting match results.16
+Target File: src/rating/dupr_client.py
+
+
+
+
+
+
+Python
+import requests
+import base64
+import logging
+
+class DUPRClient:
+   def __init__(self, api_url, client_key, client_secret, sandbox_mode=False):
+       self.api_url = api_url.rstrip('/')
+       self.client_key = client_key
+       self.client_secret = client_secret
+       self.sandbox = sandbox_mode
+       self.token = None
+       self.logger = logging.getLogger("DUPR_Client")
+
+   def authenticate(self):
+       """
+       Exchanges client credentials for a stateless JWT token.
+       """
+       auth_str = f"{self.client_key}:{self.client_secret}"
+       encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
+       headers = {
+           "x-authorization": f"Basic {encoded_auth}",
+           "Content-Type": "application/json"
+       }
+       
+       endpoint = f"{self.api_url}/auth/v1.0/token"
+       try:
+           response = requests.post(endpoint, headers=headers, timeout=10)
+           if response.status_code == 200:
+               self.token = response.json().get("token")
+               return True
+           else:
+               self.logger.error(f"Authentication failed: {response.status_code} - {response.text}")
+               return False
+       except Exception as e:
+           self.logger.error(f"Error during DUPR authentication: {str(e)}")
+           return False
+
+   def upload_match_result(self, payload):
+       """
+       Posts verified match results to DUPR.
+       """
+       if self.token is None:
+           if not self.authenticate():
+               raise ConnectionError("Authentication required to post match results.")
+               
+       headers = {
+           "Authorization": f"Bearer {self.token}",
+           "Content-Type": "application/json"
+       }
+       
+       endpoint = f"{self.api_url}/v1.0/match"
+       try:
+           response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+           if response.status_code in :
+               return {"status": "SUCCESS", "data": response.json()}
+           elif response.status_code == 429:
+               return {"status": "RATE_LIMITED"}
+           else:
+               return {"status": "FAILED", "error": response.text}
+       except Exception as e:
+           return {"status": "ERROR", "exception": str(e)}
+
+Step 7: Main Pipeline Orchestrator
+This script initializes the modules and runs high-resolution video processing.1
+Target File: app.py
+
+
+
+
+
+
+Python
+import cv2
+import yaml
+import numpy as np
+from src.court.geometry_solver import GeometrySolver
+from src.tracker.player_tracker import PlayerTracker
+from src.tracker.ball_tracker import BallTracker
+from src.scoreboard.parser import ScoreboardParser
+from src.rating.dupr_client import DUPRClient
+
+def load_system_config(config_path):
+   with open(config_path, 'r') as f:
+       return yaml.safe_load(f)
+
+def run_analytics_pipeline(config_path):
+   config = load_system_config(config_path)
+   
+   # Initialize homography solver and fit reference court layout
+   solver = GeometrySolver()
+   
+   # Static coordinate array for initial homography fitting
+   reference_keypoints = np.array(, , , # Server Baseline boundaries
+       , , , # Server NVZ lines
+       , , ,  # Opponent NVZ lines
+       , ,    # Opponent Baseline boundaries
+   ], dtype=np.float32)
+   
+   solver.fit_homography(reference_keypoints)
+   
+   # Initialize trackers and state engines
+   player_tracker = PlayerTracker(solver, min_track_length=config["player_tracker"]["min_track_length_frames"])
+   ball_tracker = BallTracker(solver, max_velocity_fps=config["ball_tracker"]["max_velocity_fps"], fps=30)
+   score_engine = ScoreboardParser()
+   
+   cap = cv2.VideoCapture(config["paths"]["video_path"])
+   frame_id = 0
+   
+   while cap.isOpened():
+       ret, frame = cap.read()
+       if not ret:
+           break
+           
+       # Simulate video input frame detection values
+       mock_ball_pixel = (640, 480) if frame_id % 2 == 0 else None
+       mock_persons = [, ]
+       
+       # Process player and ball locations
+       active_players = player_tracker.update_player_tracks(frame_id, mock_persons)
+       active_ball = ball_tracker.process_frame(frame_id, frame, mock_ball_pixel)
+       
+       frame_id += 1
+       
+   cap.release()
+   
+   # Run post-processing trajectory interpolation
+   ball_tracker.interpolate_gaps(max_gap_frames=config["ball_tracker"]["max_gap_interpolation_frames"])
+   
+   # Upload results to DUPR if enabled
+   if config["dupr_api"]["enabled"]:
+       dupr = DUPRClient(
+           api_url=config["dupr_api"]["api_url"],
+           client_key=config["dupr_api"]["client_key"],
+           client_secret=config["dupr_api"]["client_secret"]
+       )
+       match_payload = {
+           "match_source": "COURT_CHECK_CV",
+           "match_type": "DOUBLES",
+           "scoring_format": "ONE_GAME_TO_11",
+           "game_results": [
+               {
+                   "game_number": 1,
+                   "team_1_score": score_engine.current_state["server_score"],
+                   "team_2_score": score_engine.current_state["receiver_score"],
+                   "winner": "TEAM_1"
+               }
+           ],
+           "team_1": {"player_1_dupr_id": "DPR87261", "player_2_dupr_id": "DPR54329"},
+           "team_2": {"player_1_dupr_id": "DPR21098", "player_2_dupr_id": "DPR65431"}
+       }
+       dupr.upload_match_result(match_payload)
+
+if __name__ == "__main__":
+   run_analytics_pipeline("assets/config/app_config.yaml")
+
+Validation Protocols and Diagnostic Tests
+To verify that the system is functioning correctly after modernization, the following diagnostic tests check coordinate mapping, physical boundaries, and tracking accuracy.5
+
+
+
+
+
+
+Bash
+# Execute validation tests using pytest
+pytest test_physics_engine.py -v
+
+Target File: test_physics_engine.py
+
+
+
+
+
+
+Python
+import pytest
+import numpy as np
+from src.court.geometry_solver import GeometrySolver
+from src.tracker.ball_tracker import BallTracker
+from src.scoreboard.parser import ScoreboardParser
+
+def test_homography_precision():
+   """
+   Verifies that pixel-to-court projection preserves physical measurements.
+   """
+   solver = GeometrySolver()
+   reference_keypoints = np.array(, , ,
+       ,  ,  ,
+       ,  ,  ,
+       ,  ,  , dtype=np.float32)
+   
+   solver.fit_homography(reference_keypoints)
+   
+   # Calculate physical coordinates for center net line
+   center_net_physical = solver.pixel_to_court((500, 700))
+   # Net line y-position should lie near 22 ft
+   assert pytest.approx(center_net_physical, abs=1.0) == 22.0
+
+def test_speed_limit_filter():
+   """
+   Verifies that the tracking engine filters out improbable position jumps.
+   """
+   solver = GeometrySolver()
+   reference_keypoints = np.array(, , ,
+       ,  ,  ,
+       ,  ,  ,
+       ,  ,  , dtype=np.float32)
+   solver.fit_homography(reference_keypoints)
+   
+   tracker = BallTracker(solver, max_velocity_fps=161.3, fps=30)
+   
+   # Establish starting position
+   tracker.process_frame(0, None, (100, 1000))
+   
+   # Simulate ball coordinate jumping instantly across the court (physical anomaly)
+   anomalous_candidate = tracker.process_frame(1, None, (600, 400))
+   
+   # The anomaly should be discarded as invalid
+   assert anomalous_candidate is None
+
+def test_server_side_parity():
+   """
+   Verifies that server scoring matches physical player positions.
+   """
+   parser = ScoreboardParser()
+   
+   # For even scores, server must be on the right side of the court (x >= 10.0 ft)
+   assert parser.validate_position_parity(server_score=4, active_server=1, physical_server_pos=(12.0, 2.0)) == True
+   # For odd scores, server must be on the left side of the court (x < 10.0 ft)
+   assert parser.validate_position_parity(server_score=3, active_server=1, physical_server_pos=(4.0, 2.0)) == True
+
+Works cited
+      1. StanlyHardy/open-tennis: Tennis match analysis via computer vision techniques. - GitHub, accessed July 3, 2026, https://github.com/StanlyHardy/open-tennis
+      2. Tennis Ball Dataset Analysis Tool | PDF | Machine Learning - Scribd, accessed July 3, 2026, https://www.scribd.com/document/805146702/Major-Project-College-Report
+      3. Pickleball court dimensions & layout - Selkirk LABS, accessed July 3, 2026, https://www.selkirklabs.com/blogs/news/pickleball-court-dimensions-layout
+      4. Pickleball Scoring Explained: Singles, Doubles, and Rally Scoring - Eleven Zero, accessed July 3, 2026, https://elevenzerosports.com/blogs/blog/pickleball-scoring-explained-singles-doubles-and-rally-scoring
+      5. Pickleball Vision: CV-Driven Match Analytics · Ryan Tolone, accessed July 3, 2026, https://ryan-tolone.com/projects/pickleball/
+      6. MATCHMOTION: AN AI-POWERED MOBILE APPLICATION FOR AUTOMATED BADMINTON VIDEO ANALYSIS USING YOLOV8 OBJECT DETECTION - ResearchGate, accessed July 3, 2026, https://www.researchgate.net/publication/404597971_MATCHMOTION_AN_AI-POWERED_MOBILE_APPLICATION_FOR_AUTOMATED_BADMINTON_VIDEO_ANALYSIS_USING_YOLOV8_OBJECT_DETECTION
+      7. CourtCheck is a computer vision project that detects/tracks tennis court boundaries and ball movements - GitHub, accessed July 3, 2026, https://github.com/AggieSportsAnalytics/CourtCheck
+      8. Pickleball Court Dimensions: Official Measurements, Layout, and Setup Guide - UTR Sports, accessed July 3, 2026, https://www.utrsports.net/blogs/news/pickleball-court-dimensions-official-measurements-layout-and-setup-guide
+      9. Rules of Pickleball: Serving, Scoring & The Kitchen - currex, accessed July 3, 2026, https://currex.com/blogs/news/the-rules-of-pickleball-serving-scoring-kitchen-faults
+      10. How I Built an Automated Pickleball Rally Splitter Using Python and YOLOv8 - Medium, accessed July 3, 2026, https://medium.com/@vinodpolinati/how-i-built-an-automated-pickleball-rally-splitter-using-python-and-yolov8-b890a44650a4
+      11. Dimensions of a Pickleball Court: The Ultimate Guide - Dominator, accessed July 3, 2026, https://www.dominatorhoop.com/blog/dimensions-of-pickleball-court-guide/
+      12. How to keep your score in pickleball | PlayPickleball, accessed July 3, 2026, https://www.playpickleball.com/pickleball-rules-how-to-keep-score/
+      13. How to keep score in pickleball: A beginner's guide - Selkirk Sport, accessed July 3, 2026, https://www.selkirk.com/blogs/pickleball-education/how-to-keep-score-in-pickleball-a-beginners-guide
+      14. Pickleball Rules: Official Guide to Scoring, Serving & Kitchen, accessed July 3, 2026, https://www.mattspickleball.com/pickleball-rules
+      15. yuceltan/Python-Open-CV-Tennis-Ball-Tracking - GitHub, accessed July 3, 2026, https://github.com/yuceltan/Python-Open-CV-Tennis-Ball-Tracking
+      16. Swagger UI - DUPR, accessed July 3, 2026, https://uat.mydupr.com/api/swagger-ui/index.html
+      17. Understanding All Pickleball Ratings - DUPR, accessed July 3, 2026, https://www.dupr.com/post/understanding-all-pickleball-ratings
+      18. Reverse Engineering DUPR's Pickleball Rating Algorithm - DEV Community, accessed July 3, 2026, https://dev.to/therubberduckiee/reverse-engineering-duprs-pickleball-rating-algorithm-40cc
+      19. How It Works - DUPR, accessed July 3, 2026, https://www.dupr.com/how-it-works
+      20. DUPR Pickleball Rating Integration - CourtReserve, accessed July 3, 2026, https://courtreserve.com/dupr-integration/

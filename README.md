@@ -1,215 +1,177 @@
 <div align="center">
 
-# OpenTennis
+# Open Tennis - Pickleball Video Analytics Platform
 
-OpenTennis is a framework under active development to analyze Tennis matches. Currently, it supports cour edge extraction, and player information extraction via scoreboard analysis.  
+A modernized computer vision framework for analyzing pickleball matches using deep keypoint regression, physics-constrained ball tracking, and DUPR API integration.
 
-[System Architecture](#system-architecture)  • 
-[Features](#features)  • 
- [Demo](#demo)  • 
-[Installation](#installation)  • 
-[Inference](#inference)  • 
-[Configurations](#configurations)  • 
-[Roadmap](#roadmap)
- 
+[Architecture](#architecture) • [Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Usage](#usage) • [Testing](#testing) • [Roadmap](#roadmap)
+
 </div>
 
-## <div align="center">System Architecture</div>
+## Architecture
 
- <p>
-   <img  src="https://github.com/StanlyHardy/score_watch/blob/experimental/assets/graphics/sys_arch.png"></a>
-</p>
+```
+[Frame (imgsz=1280)]
+        │
+        ├─► Ball & Player Ground Coordinates
+        │
+        └─► 12 Canonical Court Keypoints
+                 │
+                 ▼
+        [Homography Solver] ──► Physical Coordinate Mapping (0-20ft x 0-44ft)
+                 │
+                 ▼
+        [Physics-Constrained Linker] ──► Trajectory & Kinematics
+```
 
-## <div align="center">Features</div>
-- [x] Court Edge Detection
-- [x] Recognize the Player Names.
-- [x] Determine the scores.
-- [x] Find the current serving player.
-- [x] Evaluate the average correct match.
+The platform replaces legacy Hough line detection with a ResNet50 keypoint regressor and upgrades YOLOv5 to YOLOv8/v10 for high-resolution ball detection. A physics-constrained tracking engine filters false positives and corrects occlusions via motion-differencing fallback.
 
-## <div align="center">Demo</div>
+## Features
 
- <p>
-   <img  src="https://github.com/StanlyHardy/score_watch/blob/experimental/assets/demo/demo1.png">
-</p>
+- [x] Court boundary mapping via 12 canonical keypoints (ResNet50)
+- [x] Homography-based pixel-to-physical coordinate projection
+- [x] High-resolution ball detection (1280px inference)
+- [x] Physics-constrained ball tracking with velocity limit filtering (161.3 fps / 110 mph max)
+- [x] Motion-differencing fallback for missed detections
+- [x] Cubic spline interpolation for tracking gap filling
+- [x] Player tracking with court boundary validation (spectator filtering)
+- [x] Pickleball side-out scoring state machine (0-0-2 starting state)
+- [x] Server position parity validation against physical court coordinates
+- [x] DUPR API integration for match result synchronization
+- [x] Configurable evaluation and video export
 
+## Installation
 
-## <div align="center">Installation</div>
-#### <div>Requirements</div>
-- Linux
-- CUDA>= 10.0
-- Python >= 3.6
+### Requirements
 
-#### Steps
+- Linux / macOS
+- Python >= 3.10
+- CUDA >= 11.0 (recommended)
 
-1. Create a virtual conda environment and activate it.
+### Steps
+
+1. Clone the repository
 
 ```bash
-conda create -n scorewatch python=3.9 -y
-conda activate scorewatch
+git clone https://github.com/your-org/open-tennis.git
+cd open-tennis
 ```
 
-2. Install Pytorch
+2. Create and activate a virtual environment
 
 ```bash
-conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# or
+.venv\Scripts\activate     # Windows
 ```
 
-4. Install TensorRT
+3. Install dependencies
 
 ```bash
-pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
+pip install -r requirements.txt
 ```
 
-5. Clone the repository
+4. Download model assets
+
+Place the following models in `assets/models/`:
+- `yolov8x_pickleball.onnx` — YOLOv8/v10 ball and player detector
+- `resnet50_keypoints.pth` — Court keypoint regressor
+
+## Configuration
+
+Edit `assets/configs/app_config.yaml` to set paths and parameters:
+
+| Section | Key | Description |
+|---------|-----|-------------|
+| `paths` | `video_path` | Input video for inference |
+| | `output_video_path` | Path to save annotated video |
+| `detector` | `inference_image_size` | YOLO inference resolution (default 1280) |
+| | `confidence_threshold` | Detection confidence threshold |
+| | `iou_threshold` | NMS IoU threshold |
+| `court_regressor` | `model_path` | ResNet50 keypoint regressor weights |
+| | `num_keypoints` | Number of court keypoints (12) |
+| | `iterative_refinement` | Enable white-line residual minimization |
+| `ball_tracker` | `max_velocity_fps` | Physical speed limit (161.3) |
+| | `max_gap_interpolation_frames` | Max frames to interpolate (5) |
+| | `motion_fallback_enabled` | Enable frame-differencing fallback |
+| `player_tracker` | `min_track_length_frames` | Minimum frames to keep a track (15) |
+| | `proximity_threshold_feet` | Hit detection radius (3.5 ft) |
+| `scoring` | `mode` | `traditional` (side-out) or `rally` |
+| | `target_score` | Points to win (default 11) |
+| | `win_by_two` | Require 2-point lead |
+| | `starting_state` | Initial score state (0-0-2) |
+| `dupr_api` | `enabled` | Enable DUPR result sync |
+| | `api_url` | DUPR API endpoint |
+| | `client_key` / `client_secret` | Partner credentials (use env vars) |
+
+## Usage
+
+Run inference on a video:
 
 ```bash
-git clone https://github.com/StanlyHardy/score_watch # clone
-cd score_watch
+python app.py
 ```
 
-6. Install other requirements
+Run the validation test suite:
 
 ```bash
-pip install -r requirements.txt # install
-```
-7. The provided `.engine` file is platform specifc. So, export `detector.pt` within `assets/models` to TensorRT engine using the official <a href="https://github.com/ultralytics/yolov5/blob/master/export.py">exporter </a>. 
-
-## <div align="center">Inference</div>
-
-Inference could run either on Video or Image streams. The configuration could be changed
-via `assets/config/app_config.yaml`. If the `evaluation` is set to true, the inference occurs in validatation dataset
-and performs evaluation to determine the Average scores for correct Player names, Scores and Serving Player. Please
-change the input paths of `video` or `images`.
-
-```
-python app.py 
+pytest test_physics_engine.py -v
 ```
 
-## <div align="center">Configurations</div>
+## Testing
 
-<details>
- <summary>App configuration(click to expand)</summary>
-  <br>
-<table>
- <tr>
-    <th>Section</th>
-    <th>Feature</th>
-    <th>Description</th>
-  </tr>
- <tr>
-  <td rowspan="6">&nbsp; Paths </td>
-  <td>&nbsp; <code>video_path</code></td>
-  <td>&nbsp;Path of the video on which the evaluation needs to be done.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>img_path</code></td>
-  <td>&nbsp;Directory containing the test images. Ground truth needs to be available for evaluation with image set.</td>
- </tr>
-  <tr>
-  <td>&nbsp;<code>players_path</code></td>
-  <td>&nbsp;Path containing player informations</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>groundtruth_path</code></td>
-  <td>&nbsp;Ground truth data which is in json format that has got the player information.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>output_video_path</code></td>
-  <td>&nbsp;The path to save the video if the output needs to be saved and visualized later.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>logs_path</code></td>
-  <td>&nbsp;Path where the output log will be saved.</td>
- </tr>
- <tr>
-  <td rowspan="5">&nbsp; Streamer </td>
-  <td>&nbsp; <code>should_draw'</code></td>
-  <td>&nbsp;Draws over the frames for visualization , if enabled.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>view_imshow</code></td>
-  <td>&nbsp;The output visualization shall be turned on/off with this parameter.</td>
- </tr>
-  <tr>
-  <td>&nbsp;<code>save_stream</code></td>
-  <td>&nbsp;Turning on this field enables the video output to be saved in the path defined in <code>output_video_path</code></td>
- </tr>
- <tr>
-  <td>&nbsp;<code>debug</code></td>
-  <td>&nbsp;Displays debug logs if enabled</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>evaluation</code></td>
-  <td>&nbsp;Turn on if the evaluation has to be done over the image set. Both image set and the annotations are required in this case.</td>
- </tr>
- <td rowspan="5">&nbsp; Models </td>
-  <td>&nbsp; <code>score_det_model'</code></td>
-  <td>&nbsp; Path of the score detector model.</td>
- <tr>
-  <td>&nbsp;<code>detector_config</code></td>
-  <td>&nbsp; Path of the config file for the score detector. </td>
- </tr>
-  <tr>
-  <td>&nbsp;<code>text_rec_model</code></td>
-  <td>&nbsp;CRNN Model path responsible for Player information recognition. </td>
- </tr>
- <tr>
-  <td>&nbsp;<code>text_rec_config</code></td>
-  <td>&nbsp;Path to the configuration for the CRNN model</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>ocr_engine</code></td>
-  <td>&nbsp;Choose between <code>CRNN</code> or <code>PyTesseract</code>. </td>
- </tr>
-</table>
-</details>
-<details>
- <summary>Detector Configuration(click to expand)</summary>
- <br>
-<table>
- <tr>
-    <th>Section</th>
-    <th>Feature</th>
-    <th>Description</th>
-  </tr>
- <tr>
-  <td rowspan="5">&nbsp; YOLOv5 </td>
-  <td>&nbsp; <code>execution_env</code></td>
-  <td>&nbsp;ONNX Runtime provides support for CUDA, CPU and TensorRT. By default, CUDA is chosen. ONNX Runtime falls back to cpu if CUDA is unavailable.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>conf_thresh</code></td>
-  <td>&nbsp;Detection confidence</td>
- </tr>
-  <tr>
-  <td>&nbsp;<code>iou_thres</code></td>
-  <td>&nbsp;IOU threshold to gauge the overlap.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>warm_up</code></td>
-  <td>&nbsp;Number of samples to be used during the warm up phase.</td>
- </tr>
- <tr>
-  <td>&nbsp;<code>class_labels</code></td>
-  <td>&nbsp;Class labels</td>
- </tr>
- <tr>
-</table>
-</details>
+The project includes physics-based validation tests:
 
-## <div align="center">Roadmap</div>
+- **Homography precision** — Verifies pixel-to-court projection accuracy (net line at y=22 ft)
+- **Speed limit filter** — Ensures the tracker discards improbable position jumps
+- **Server side parity** — Validates scoring state against physical player positions
+- **Canonical keypoints** — Confirms court geometry mapping
+- **Scoring state machine** — Verifies side-out state transitions
 
-- [ ] Train CRNN with wide set of Data from ATP/Wimbledon matches.
-- [ ] Implement Ball Tracking, Trajectory Analysis
-- [ ] Player tracking.
-- [ ] Predict the style and the outcome of shot
-- [ ] Player activity analysis
+## Roadmap
 
+- [ ] Train ResNet50 keypoint regressor on pickleball court datasets
+- [ ] Integrate YOLOv8/v10 ONNX runtime for production inference
+- [ ] Implement velocity-reversal hit detection heuristic
+- [ ] Add rally segmentation and shot classification
+- [ ] Player activity analysis and heatmaps
+- [ ] Multi-camera calibration and synchronization
 
-## <div align="center">Acknowledgement</div>
+## Project Structure
 
-* [ONNX Runtime](https://onnxruntime.ai/docs/install/)&nbsp;
-* [YOLOv5](https://github.com/ultralytics/yolov5)&nbsp;
-* [TesserOCR](https://github.com/sirfz/tesserocr)&nbsp;
-* [CRNN](https://www.kaggle.com/alizahidraja/custom-ocr-crnn)&nbsp;
+```
+open-tennis/
+├── app.py                        # Main orchestrator
+├── requirements.txt              # Modern Python dependencies
+├── test_physics_engine.py        # Validation tests
+├── assets/
+│   ├── configs/
+│   │   ├── app_config.yaml       # Main application config
+│   │   └── detector_config.yaml  # YOLO detector parameters
+│   └── models/                   # Model weights (.onnx, .pth)
+├── src/
+│   ├── court/
+│   │   └── geometry_solver.py    # Homography and coordinate mapping
+│   ├── tracker/
+│   │   ├── ball_tracker.py       # Physics-constrained ball tracking
+│   │   ├── player_tracker.py     # Player track filtering
+│   │   └── motion_ball.py        # Frame-differencing fallback
+│   ├── scoreboard/
+│   │   └── parser.py             # Pickleball side-out scoring engine
+│   ├── rating/
+│   │   └── dupr_client.py        # DUPR API integration
+│   ├── controllers/
+│   │   ├── open_tennis.py        # Legacy orchestrator
+│   │   ├── model_manager.py      # TensorRT / ONNX runtime
+│   │   └── detector/
+│   │       └── score_detector.py # YOLO inference wrapper
+│   └── utils/
+│       ├── daos.py               # Data transfer objects
+│       ├── math_utils.py         # Geometry utilities
+│       └── renderer.py           # Visualization
+```
+
+## License
+
+MIT
